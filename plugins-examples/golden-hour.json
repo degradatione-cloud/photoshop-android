@@ -1,0 +1,10 @@
+{
+  "id": "golden-hour",
+  "name": "Golden Hour",
+  "brightness": 8,
+  "contrast": 10,
+  "saturation": 1.25,
+  "temperature": 55,
+  "vignette": 0.12,
+  "fade": 0.08
+}

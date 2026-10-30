@@ -1,5 +1,6 @@
 package com.degradatione.psandroid
 
+import android.graphics.Bitmap
 import android.graphics.Color as AColor
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -75,8 +77,10 @@ fun PanelsSheet(
     onTab: (Int) -> Unit,
     note: (String) -> Unit,
     onAction: (String) -> Unit,
+    plugins: List<FilterDef>,
+    onPluginImport: () -> Unit,
 ) {
-    val tabs = listOf("Слои", "Цвет", "Правка", "История")
+    val tabs = listOf("Слои", "Цвет", "Эффекты", "Правка", "История")
     Column(Modifier.fillMaxWidth().fillMaxHeight(0.86f)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp),
@@ -107,7 +111,8 @@ fun PanelsSheet(
             when (current) {
                 0 -> LayersPanel(ed, note)
                 1 -> ColorPanel(ed, note)
-                2 -> AdjustPanel(ed, onAction)
+                2 -> EffectsPanel(ed, plugins, onPluginImport, note)
+                3 -> AdjustPanel(ed, onAction)
                 else -> HistoryPanel(ed, journal, note)
             }
         }
@@ -325,6 +330,167 @@ private fun ColorPanel(ed: Editor, note: (String) -> Unit) {
         }
         Spacer(Modifier.height(10.dp))
     }
+}
+
+@Composable
+private fun EffectsPanel(
+    ed: Editor,
+    plugins: List<FilterDef>,
+    onImportPlugin: () -> Unit,
+    note: (String) -> Unit,
+) {
+    var strength by remember { mutableFloatStateOf(1f) }
+    val filters = remember(plugins) { FilterLibrary.builtIn + plugins }
+    val previews = remember(ed.version, plugins) {
+        val base = runCatching {
+            val comp = ed.composite()
+            val side = minOf(comp.width, comp.height)
+            Bitmap.createBitmap(comp, (comp.width - side) / 2, (comp.height - side) / 2, side, side)
+        }.getOrNull()
+        base?.let { b -> filters.associate { it.id to FilterLibrary.preview(b, it) } } ?: emptyMap()
+    }
+
+    Column(Modifier.fillMaxWidth().fillMaxHeight()) {
+        LazyRow(
+            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            items(filters, key = { it.id }) { f ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(62.dp)) {
+                    TapBox(
+                        Modifier.size(56.dp)
+                            .background(Ps.panelDark, RoundedCornerShape(10.dp))
+                            .border(1.dp, if (f.plugin) Ps.blue.copy(alpha = 0.6f) else Ps.border, RoundedCornerShape(10.dp)),
+                        onClick = {
+                            if (f.id == "original") {
+                                note("Оригинал")
+                            } else {
+                                ed.applyFilter(f, strength)
+                                note(f.name)
+                            }
+                        },
+                    ) {
+                        previews[f.id]?.let {
+                            androidx.compose.foundation.Image(
+                                bitmap = it.asImageBitmap(),
+                                contentDescription = f.name,
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+                    Text(
+                        f.name, color = Ps.textDim, fontSize = 8.5.sp, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp),
+                    )
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("сила", color = Ps.textFaint, fontSize = 9.5.sp)
+            Box(Modifier.weight(1f).padding(horizontal = 6.dp)) {
+                Slider(
+                    value = strength, onValueChange = { strength = it }, valueRange = 0.15f..1f,
+                    modifier = Modifier.height(24.dp),
+                    colors = SliderDefaults.colors(thumbColor = Ps.blue, activeTrackColor = Ps.blue, inactiveTrackColor = Ps.border),
+                )
+            }
+            Text("${(strength * 100).roundToInt()}%", color = Ps.textDim, fontSize = 9.5.sp, modifier = Modifier.width(30.dp))
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Ps.border))
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            PsChip("Виньетка") { ed.quickVignette(); note("Виньетка") }
+            PsChip("Зерно") { ed.quickGrain(); note("Зерно") }
+            PsChip("Рамка бел.") { ed.addFrame(AColor.WHITE, (ed.doc.width * 0.035f).toInt().coerceAtLeast(6)); note("Рамка") }
+            PsChip("Рамка чёрн.") { ed.addFrame(AColor.BLACK, (ed.doc.width * 0.035f).toInt().coerceAtLeast(6)); note("Рамка") }
+            PsChip("Размытие") { ed.blur(); note("Размытие") }
+            PsChip("Резкость") { ed.sharpen() }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Ps.border))
+        Text(
+            "СТИКЕРЫ", color = Ps.textFaint, fontSize = 9.sp, letterSpacing = 1.sp,
+            modifier = Modifier.padding(start = 10.dp, top = 8.dp),
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            for (e in listOf("😀", "🔥", "💥", "⭐", "❤️", "🌈", "✨", "🎯", "🥶", "👑")) {
+                TapBox(
+                    Modifier.size(38.dp).background(Ps.panelAlt, RoundedCornerShape(10.dp)),
+                    onClick = {
+                        ed.stampEmoji(e, ed.doc.width * 0.35f)
+                        note("Стикер $e")
+                    },
+                ) { Text(e, fontSize = 18.sp) }
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Ps.border))
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Плагинов эффектов: ${plugins.size}" + if (plugins.isEmpty()) " — подключи .json" else "",
+                color = Ps.textFaint, fontSize = 9.5.sp, modifier = Modifier.weight(1f),
+            )
+            PsChip("Импорт плагина", accent = true, onClick = onImportPlugin)
+        }
+    }
+}
+
+@Composable
+fun HelpSheet(onDismiss: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text("Как пользоваться", color = Ps.text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Один палец — инструмент на холсте. Два пальца — масштаб и прокрутка. " +
+                "Все коррекции применяются к активному слою (см. панель «Слои»).",
+            color = Ps.textDim, fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(10.dp))
+        for (t in PsTool.entries) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(30.dp).background(Ps.panelAlt, RoundedCornerShape(8.dp)),
+                    contentAlignment = Alignment.Center,
+                ) { ToolGlyph(t, Ps.blue, 17.dp) }
+                Spacer(Modifier.width(9.dp))
+                Column {
+                    Text(t.label, color = Ps.text, fontSize = 11.5.sp)
+                    Text(hint(t), color = Ps.textFaint, fontSize = 9.5.sp)
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Эффекты: панель «Эффекты» — там превью фильтров, сила, стикеры и рамки. " +
+                "Плагин — обычный .json с параметрами фильтра, кладётся кнопкой «Импорт плагина».",
+            color = Ps.textDim, fontSize = 10.5.sp,
+        )
+        Spacer(Modifier.height(12.dp))
+        PsChip("Понятно", accent = true, onClick = onDismiss)
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+private fun hint(t: PsTool): String = when (t) {
+    PsTool.MOVE -> "тащить холст"
+    PsTool.BRUSH -> "рисовать, размер и прозрачность снизу"
+    PsTool.ERASER -> "стирать в прозрачность"
+    PsTool.FILL -> "залить область с допуском"
+    PsTool.EYEDROPPER -> "взять цвет с картинки"
+    PsTool.CROP -> "рамка по холсту → «Применить»"
+    PsTool.TEXT -> "тап по холсту — ввод текста"
+    PsTool.ZOOM -> "тап — приблизить точку"
 }
 
 @Composable

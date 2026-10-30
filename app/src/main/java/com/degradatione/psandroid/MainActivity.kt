@@ -169,6 +169,8 @@ fun PsApp(ed: Editor) {
     var update by remember { mutableStateOf<Updater.Release?>(null) }
     var pill by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf<String?>(null) }
+    var plugins by remember { mutableStateOf(FilterLibrary.loadPlugins(ctx.filesDir)) }
+    var showHelp by remember { mutableStateOf(false) }
 
     LaunchedEffect(ed.status) {
         val s = ed.status
@@ -226,6 +228,22 @@ fun PsApp(ed: Editor) {
                 openBitmap(bmp, "photo-${System.currentTimeMillis() % 10000}")
             }.onFailure { note("Фото не открылось: ${it.message}") }
             busy = null
+        }
+    }
+
+    val pickPlugin = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val res = withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = ctx.contentResolver.openInputStream(uri)!!.bufferedReader().readText()
+                    FilterLibrary.installPlugin(ctx.filesDir, text, uri.lastPathSegment?.substringAfterLast('/') ?: "plugin.json")
+                }
+            }
+            res.onSuccess {
+                plugins = FilterLibrary.loadPlugins(ctx.filesDir)
+                note("Плагин установлен: ${it.name}")
+            }.onFailure { note("Плагин не подошёл: ${it.message}") }
         }
     }
 
@@ -308,6 +326,7 @@ fun PsApp(ed: Editor) {
             "layerDup" -> ed.duplicateLayer()
             "layerDel" -> ed.deleteLayer()
             "panels" -> showPanels = true
+            "help" -> showHelp = true
             "update" -> scope.launch {
                 val r = Updater.check(Updater.DEFAULT_REPO)
                 if (r != null && r.versionCode > Updater.installedVersionCode(ctx)) {
@@ -495,8 +514,25 @@ fun PsApp(ed: Editor) {
                 onTab = { panelTab = it },
                 note = { note(it) },
                 onAction = { action(it) },
+                plugins = plugins,
+                onPluginImport = { pickPlugin.launch(arrayOf("application/json", "text/plain", "*/*")) },
             )
         }
+    }
+
+    if (showHelp) {
+        ModalBottomSheet(
+            onDismissRequest = { showHelp = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = Ps.panel,
+            contentColor = Ps.text,
+            dragHandle = {
+                Box(
+                    Modifier.padding(vertical = 7.dp).size(width = 32.dp, height = 3.dp)
+                        .background(Ps.border, RoundedCornerShape(2.dp))
+                )
+            },
+        ) { HelpSheet(onDismiss = { showHelp = false }) }
     }
 
     when (dialog) {
@@ -659,7 +695,8 @@ private val MENU = listOf(
     "Дублировать слой" to "layerDup",
     "Удалить слой" to "layerDel",
     "Свести слои" to "flatten",
-    "ПРОЧЕЕ" to "",
+    "ПОМОЩЬ" to "",
+    "Как пользоваться" to "help",
     "Проверить обновления" to "update",
 )
 

@@ -589,6 +589,118 @@ class Editor {
         return file
     }
 
+    // ── эффекты и плагины ──────────────────────────────────────────────────
+    /**
+     * Применяет фильтр к активному слою. strength 0..1 — сила эффекта
+     * (смешивание с оригиналом), чтобы не убивать фото сразу.
+     */
+    fun applyFilter(def: FilterDef, strength: Float = 1f) {
+        val l = layer ?: return
+        if (def.id == "original") return
+        checkpoint(def.name)
+        val w = l.bitmap.width
+        val h = l.bitmap.height
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { colorFilter = ColorMatrixColorFilter(def.matrix()) }
+        c.drawBitmap(l.bitmap, 0f, 0f, paint)
+        if (def.fade > 0f) {
+            val p = Paint().apply {
+                color = Color.WHITE
+                alpha = (def.fade * 200).toInt()
+                xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
+            }
+            c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), p)
+        }
+        if (def.duotoneA != null && def.duotoneB != null) {
+            val grad = android.graphics.LinearGradient(
+                0f, 0f, w.toFloat(), h.toFloat(),
+                Color.parseColor(def.duotoneA), Color.parseColor(def.duotoneB),
+                android.graphics.Shader.TileMode.CLAMP,
+            )
+            val p = Paint().apply {
+                shader = grad
+                xfermode = PorterDuffXfermode(PorterDuff.Mode.COLOR)
+                alpha = 200
+            }
+            c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), p)
+        }
+        if (def.vignette > 0f) {
+            drawVignette(c, w, h, def.vignette)
+        }
+        if (def.grain > 0f) {
+            FilterLibrary.grainOverlay(out, def.grain)
+        }
+        val s = strength.coerceIn(0f, 1f)
+        if (s < 0.999f) {
+            // смешиваем с оригиналом: сила эффекта
+            c.drawBitmap(l.bitmap, 0f, 0f, Paint().apply { alpha = ((1f - s) * 255).toInt() })
+        }
+        l.bitmap = out
+        version++
+        status = "${def.name}: ${(s * 100).roundToInt()}%"
+    }
+
+    private fun drawVignette(c: Canvas, w: Int, h: Int, strength: Float) {
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.RadialGradient(
+                w / 2f, h / 2f, maxOf(w, h) * 0.72f,
+                intArrayOf(0x00000000, android.graphics.Color.argb((strength.coerceIn(0f, 1f) * 255).toInt(), 0, 0, 0)),
+                floatArrayOf(0.5f, 1f),
+                android.graphics.Shader.TileMode.CLAMP,
+            )
+        }
+        c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), p)
+    }
+
+    fun quickVignette() {
+        val l = layer ?: return
+        checkpoint("Виньетка")
+        drawVignette(Canvas(l.bitmap), l.bitmap.width, l.bitmap.height, 0.45f)
+        version++
+    }
+
+    fun quickGrain() {
+        val l = layer ?: return
+        checkpoint("Зерно")
+        FilterLibrary.grainOverlay(l.bitmap, 0.5f)
+        version++
+    }
+
+    /** Рамка отдельным слоем — исходники не портит. */
+    fun addFrame(color: Int, widthPx: Int) {
+        checkpoint("Рамка")
+        val bmp = Bitmap.createBitmap(doc.width, doc.height, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = widthPx.toFloat()
+            this.color = color
+        }
+        val inset = widthPx / 2f
+        c.drawRect(inset, inset, doc.width - inset, doc.height - inset, p)
+        doc.layers.add(Layer(PsDocument.nextId(), "Frame", bmp))
+        activeIndex = doc.layers.lastIndex
+        version++
+        status = "Рамка добавлена"
+    }
+
+    /** Эмодзи-стикер отдельным слоем по центру. */
+    fun stampEmoji(emoji: String, sizePx: Float) {
+        checkpoint("Стикер $emoji")
+        val bmp = Bitmap.createBitmap(doc.width, doc.height, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = sizePx
+            textAlign = Paint.Align.CENTER
+        }
+        c.drawText(emoji, doc.width / 2f, doc.height / 2f + sizePx / 3f, p)
+        doc.layers.add(Layer(PsDocument.nextId(), "Sticker $emoji", bmp))
+        activeIndex = doc.layers.lastIndex
+        version++
+        status = "Стикер $emoji"
+    }
+
     // ── кадрирование и экспорт ─────────────────────────────────────────────
     fun crop(rect: RectF) {
         val x = rect.left.toInt().coerceIn(0, doc.width - 1)
