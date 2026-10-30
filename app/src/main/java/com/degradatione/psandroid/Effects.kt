@@ -156,8 +156,8 @@ object FilterLibrary {
             )
             val p = Paint().apply {
                 shader = grad
-                xfermode = PorterDuffXfermode(PorterDuff.Mode.COLOR)
-                alpha = 190
+                xfermode = PorterDuffXfermode(PorterDuff.Mode.MULTIPLY)
+                alpha = 210
             }
             c.drawRect(0f, 0f, size.toFloat(), size.toFloat(), p)
         }

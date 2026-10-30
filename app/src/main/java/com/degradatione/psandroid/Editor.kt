@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.BlendMode
 import java.io.File
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 enum class PsBlend(val label: String, val compose: BlendMode, val porter: PorterDuff.Mode) {
     NORMAL("Normal", BlendMode.SrcOver, PorterDuff.Mode.SRC_OVER),
@@ -620,8 +621,8 @@ class Editor {
             )
             val p = Paint().apply {
                 shader = grad
-                xfermode = PorterDuffXfermode(PorterDuff.Mode.COLOR)
-                alpha = 200
+                xfermode = PorterDuffXfermode(PorterDuff.Mode.MULTIPLY)
+                alpha = 210
             }
             c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), p)
         }
