@@ -1,4 +1,10 @@
+> **Небольшой проект для портирования.** Порт интерфейса Adobe Photoshop на Android:
+> Compose + собственное растровое ядро, PSD-парсер/писатель на Rust (PhotoCraft) через JNI.
+> Всё считается на телефоне, ничего не уезжает в облако.
+
 # Photoshop для Android (клон интерфейса)
+
+[Последний релиз](https://github.com/degradatione-cloud/photoshop-android/releases/latest) · `com.degradatione.psandroid` · Android 15+ (API 35)
 
 Настоящий Adobe Photoshop портировать нельзя — закрытый бинарь под x86/ARM-десктоп, миллионы строк, лицензия.
 Это рабочая альтернатива с **тем же интерфейсом**: панели, тулбар с шорткатами, слои, режимы наложения,
