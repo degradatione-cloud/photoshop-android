@@ -12,7 +12,7 @@ android {
         applicationId = "com.degradatione.psandroid"
         minSdk = 35
         targetSdk = 36
-        versionCode = 1
+        versionCode = 100
         versionName = "0.1.0"
         resourceConfigurations += listOf("en", "ru")
     }
