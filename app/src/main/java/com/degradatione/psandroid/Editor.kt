@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.BlendMode
 import java.io.File
+import kotlin.math.pow
 
 enum class PsBlend(val label: String, val compose: BlendMode, val porter: PorterDuff.Mode) {
     NORMAL("Normal", BlendMode.SrcOver, PorterDuff.Mode.SRC_OVER),
@@ -68,6 +69,17 @@ class PsDocument(var width: Int, var height: Int, val layers: MutableList<Layer>
 
 data class UndoStep(val label: String, val doc: PsDocument, val active: Int)
 
+/** Растрированный слой, пришедший из PSD-ядра. */
+data class ParsedLayer(
+    val name: String,
+    val x: Int,
+    val y: Int,
+    val opacity: Float,
+    val blend: PsBlend,
+    val visible: Boolean,
+    val bitmap: Bitmap?,
+)
+
 enum class PsTool(val key: String, val label: String) {
     MOVE("V", "Перемещение"),
     BRUSH("B", "Кисть"),
@@ -98,6 +110,8 @@ class Editor {
 
     var tool by mutableStateOf(PsTool.BRUSH)
     var brushSize by mutableStateOf(28f)
+    var brushHardness by mutableStateOf(0.85f)
+    var brushOpacity by mutableStateOf(1f)
     var foreground by mutableStateOf(Color.parseColor("#FF3B30"))
     var background by mutableStateOf(Color.WHITE)
     var docName by mutableStateOf("Untitled-1")
@@ -272,6 +286,13 @@ class Editor {
         val l = layer ?: return
         val c = Canvas(l.bitmap)
         brushPaint.strokeWidth = brushSize
+        brushPaint.alpha = (brushOpacity.coerceIn(0.05f, 1f) * 255).toInt()
+        brushPaint.maskFilter = if (brushHardness < 0.98f) {
+            android.graphics.BlurMaskFilter(
+                (brushSize * 0.22f * (1f - brushHardness)).coerceAtLeast(0.8f),
+                android.graphics.BlurMaskFilter.Blur.NORMAL,
+            )
+        } else null
         if (eraser) {
             brushPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
             brushPaint.color = Color.TRANSPARENT
@@ -425,6 +446,149 @@ class Editor {
         version++
     }
 
+    // ── трансформации, уровни, тон, резкость ───────────────────────────────
+    fun rotate90(clockwise: Boolean) {
+        checkpoint(if (clockwise) "Поворот 90°" else "Поворот −90°")
+        val nw = doc.height
+        val nh = doc.width
+        val out = doc.layers.map { l ->
+            val bmp = Bitmap.createBitmap(nw, nh, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            c.translate(nw / 2f, nh / 2f)
+            c.rotate(if (clockwise) 90f else -90f)
+            c.translate(-doc.width / 2f, -doc.height / 2f)
+            c.drawBitmap(l.bitmap, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+            Layer(l.id, l.name, bmp, l.visible, l.opacity, l.blend)
+        }
+        doc = PsDocument(nw, nh, out.toMutableList())
+        version++
+    }
+
+    fun flip(horizontal: Boolean) {
+        checkpoint(if (horizontal) "Отразить по горизонтали" else "Отразить по вертикали")
+        doc.layers.forEach { l ->
+            val bmp = Bitmap.createBitmap(doc.width, doc.height, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            if (horizontal) {
+                c.scale(-1f, 1f, doc.width / 2f, doc.height / 2f)
+            } else {
+                c.scale(1f, -1f, doc.width / 2f, doc.height / 2f)
+            }
+            c.drawBitmap(l.bitmap, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+            l.bitmap = bmp
+        }
+        version++
+    }
+
+    fun resize(w: Int, h: Int) {
+        val tw = w.coerceIn(16, 2400)
+        val th = h.coerceIn(16, 2400)
+        checkpoint("Размер $tw × $th")
+        val out = doc.layers.map { l ->
+            val bmp = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
+            Canvas(bmp).drawBitmap(
+                l.bitmap, null, Rect(0, 0, tw, th),
+                Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+            )
+            Layer(l.id, l.name, bmp, l.visible, l.opacity, l.blend)
+        }
+        doc = PsDocument(tw, th, out.toMutableList())
+        version++
+    }
+
+    /** Уровни: чёрная и белая точки входа 0..255. */
+    fun levels(black: Float, white: Float) {
+        val b = black.coerceIn(0f, 254f)
+        val w = white.coerceIn(b + 1f, 255f)
+        val scale = 255f / (w - b)
+        applyMatrix(
+            ColorMatrix(
+                floatArrayOf(
+                    scale, 0f, 0f, 0f, -b * scale,
+                    0f, scale, 0f, 0f, -b * scale,
+                    0f, 0f, scale, 0f, -b * scale,
+                    0f, 0f, 0f, 1f, 0f,
+                )
+            ),
+            "Уровни %.0f–%.0f".format(b, w),
+        )
+    }
+
+    /** Экспозиция в EV: −2…+2. */
+    fun exposure(ev: Float) {
+        val g = 2f.pow(ev.coerceIn(-2f, 2f))
+        applyMatrix(
+            ColorMatrix(
+                floatArrayOf(
+                    g, 0f, 0f, 0f, 0f,
+                    0f, g, 0f, 0f, 0f,
+                    0f, 0f, g, 0f, 0f,
+                    0f, 0f, 0f, 1f, 0f,
+                )
+            ),
+            "Экспозиция %+.1f".format(ev),
+        )
+    }
+
+    /** Температура: −100 холоднее, +100 теплее. */
+    fun temperature(k: Float) {
+        val t = (k.coerceIn(-100f, 100f) / 100f) * 0.3f
+        applyMatrix(
+            ColorMatrix(
+                floatArrayOf(
+                    1f + t, 0f, 0f, 0f, 0f,
+                    0f, 1f, 0f, 0f, 0f,
+                    0f, 0f, 1f - t, 0f, 0f,
+                    0f, 0f, 0f, 1f, 0f,
+                )
+            ),
+            "Температура %+.0f".format(k),
+        )
+    }
+
+    /** Резкость: свёртка 3×3 (нерезкое маскирование по ядру). */
+    fun sharpen() {
+        val l = layer ?: return
+        checkpoint("Резкость")
+        val w = l.bitmap.width
+        val h = l.bitmap.height
+        val src = IntArray(w * h)
+        l.bitmap.getPixels(src, 0, w, 0, 0, w, h)
+        val dst = IntArray(w * h)
+        val k = intArrayOf(0, -1, 0, -1, 5, -1, 0, -1, 0)
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                var r = 0
+                var g = 0
+                var b = 0
+                var i = 0
+                for (dy in -1..1) {
+                    for (dx in -1..1) {
+                        val px = (x + dx).coerceIn(0, w - 1)
+                        val py = (y + dy).coerceIn(0, h - 1)
+                        val c = src[py * w + px]
+                        val wgt = k[i++]
+                        r += Color.red(c) * wgt
+                        g += Color.green(c) * wgt
+                        b += Color.blue(c) * wgt
+                    }
+                }
+                val a = Color.alpha(src[y * w + x])
+                dst[y * w + x] = Color.argb(a, r.coerceIn(0, 255), g.coerceIn(0, 255), b.coerceIn(0, 255))
+            }
+        }
+        l.bitmap.setPixels(dst, 0, w, 0, 0, w, h)
+        version++
+        status = "Резкость применена"
+    }
+
+    fun exportJpg(file: File, quality: Int = 92): File {
+        file.parentFile?.mkdirs()
+        file.outputStream().use { composite().compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(40, 100), it) }
+        status = "Сохранено JPG: ${file.name} (${file.length() / 1024} KB)"
+        return file
+    }
+
     // ── кадрирование и экспорт ─────────────────────────────────────────────
     fun crop(rect: RectF) {
         val x = rect.left.toInt().coerceIn(0, doc.width - 1)
@@ -463,4 +627,21 @@ class Editor {
     }
 
     fun loadFile(path: String): Bitmap? = runCatching { BitmapFactory.decodeFile(path) }.getOrNull()
+
+    /** Импорт PSD: слои приходят уже растрированными (PSD-ядро PhotoCraft). */
+    fun importLayers(w: Int, h: Int, name: String, parsed: List<ParsedLayer>) {
+        val layers = parsed.map { p ->
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            if (p.bitmap != null) {
+                Canvas(bmp).drawBitmap(p.bitmap, p.x.toFloat(), p.y.toFloat(), Paint(Paint.FILTER_BITMAP_FLAG))
+            }
+            Layer(PsDocument.nextId(), p.name, bmp, p.visible, p.opacity, p.blend)
+        }
+        doc = PsDocument(w, h, (if (layers.isEmpty()) mutableListOf(Layer(PsDocument.nextId(), "Layer 1", Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888))) else layers).toMutableList())
+        activeIndex = doc.layers.lastIndex
+        undo.clear(); redo.clear(); history = emptyList(); redoAvailable = 0
+        docName = name
+        status = "PSD: ${parsed.size} слоёв, $w × $h"
+        version++
+    }
 }

@@ -43,6 +43,36 @@ jobs:
           echo "code=$VC" >> "$GITHUB_OUTPUT"
           echo "version $VN ($VC)"
 
+      - name: Rust toolchain + targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-linux-android x86_64-linux-android
+          cargo install cargo-ndk --locked
+
+      - name: Android NDK
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-}"
+          if [ -z "$NDK" ] || [ ! -d "$NDK" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" > /dev/null
+            NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          fi
+          echo "ANDROID_NDK_HOME=$NDK" >> "$GITHUB_ENV"
+          echo "ndk: $NDK"
+
+      - name: Build PSD core (Rust → jniLibs)
+        working-directory: rust
+        run: |
+          cargo ndk -t arm64-v8a -t x86_64 -o ../app/src/main/jniLibs build --release -p psd-jni
+          find ../app/src/main/jniLibs -name '*.so' -exec ls -lh {} \;
+
+      - name: Rust PSD smoke test (off-device)
+        working-directory: rust
+        run: |
+          cargo run --release -q -p psd-jni --bin mkpsd -- /tmp/test.psd
+          cargo run --release -q -p psd-jni --bin psdinfo -- /tmp/test.psd /tmp/psdout | tee /tmp/psd.json
+          grep -q '"ok":true' /tmp/psd.json
+          ls -la /tmp/psdout
+
       - name: Unit tests (Robolectric composition smoke)
         run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 

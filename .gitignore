@@ -11,3 +11,5 @@ local.properties
 app-release.p12
 out/*key*.txt
 app-release.p12
+/rust/target
+/app/src/main/jniLibs

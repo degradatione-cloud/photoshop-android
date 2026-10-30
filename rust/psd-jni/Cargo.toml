@@ -1,0 +1,13 @@
+[package]
+name = "psd-jni"
+version = "0.2.0"
+edition = "2021"
+
+[lib]
+name = "psd_jni"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+jni = "0.21"
+png = "0.17"
+photocraft-psd = { path = "../psd" }
