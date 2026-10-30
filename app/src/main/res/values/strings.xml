@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Photoshop</string>
+    <style name="Theme.Photoshop" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">#1E1E1E</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
