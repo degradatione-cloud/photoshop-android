@@ -298,7 +298,7 @@ fun PsApp(ed: Editor) {
                 Modifier.fillMaxWidth().background(Ps.accent.copy(alpha = 0.18f))
                     .clickable {
                         scope.launch {
-                            launchDownload(ctx, r, note) { update = null }
+                            launchDownload(ctx, r, { msg: String -> note(msg) }) { update = null }
                         }
                     }
                     .padding(horizontal = 12.dp, vertical = 7.dp),
@@ -439,7 +439,7 @@ fun PsApp(ed: Editor) {
                     PsButton("Применить") {
                         cropRect?.let { r ->
                             if (r.width > 4 && r.height > 4) {
-                                ed.crop(r)
+                                ed.crop(android.graphics.RectF(r.left, r.top, r.right, r.bottom))
                                 note(ed.status)
                             }
                         }

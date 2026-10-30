@@ -27,7 +27,7 @@ enum class PsBlend(val label: String, val compose: BlendMode, val porter: Porter
     DARKEN("Darken", BlendMode.Darken, PorterDuff.Mode.DARKEN),
     LIGHTEN("Lighten", BlendMode.Lighten, PorterDuff.Mode.LIGHTEN),
     ADD("Linear Dodge", BlendMode.Plus, PorterDuff.Mode.ADD),
-    DIFFERENCE("Difference", BlendMode.Difference, PorterDuff.Mode.DIFFERENCE),
+    DIFFERENCE("Difference", BlendMode.Difference, PorterDuff.Mode.XOR),
 }
 
 class Layer(

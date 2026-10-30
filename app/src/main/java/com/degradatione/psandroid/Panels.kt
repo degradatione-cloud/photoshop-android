@@ -83,7 +83,7 @@ fun PsButton(text: String, modifier: Modifier = Modifier, accent: Boolean = fals
 }
 
 @Composable
-fun SmallIcon(icon: ImageVector, desc: String, onClick: () -> Unit, tint: Color = Ps.textDim) {
+fun SmallIcon(icon: ImageVector, desc: String, tint: Color = Ps.textDim, onClick: () -> Unit) {
     Box(
         Modifier.size(34.dp).clickable(
             interactionSource = remember { MutableInteractionSource() },

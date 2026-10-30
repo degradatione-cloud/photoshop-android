@@ -55,7 +55,7 @@ object Updater {
         }
         try {
             if (conn.responseCode != 200) {
-                android.util.Log.w("update", "update", "releases/latest → HTTP ${conn.responseCode} ($repo)")
+                android.util.Log.w("update", "releases/latest → HTTP ${conn.responseCode} ($repo)")
                 return@withContext null
             }
             val body = conn.inputStream.bufferedReader().readText()
@@ -85,7 +85,7 @@ object Updater {
                 digest = asset.optString("digest").takeIf { it.startsWith("sha256:") },
             )
         } catch (t: Throwable) {
-            android.util.Log.w("update", "update", "проверка обновлений: ${t.message}")
+            android.util.Log.w("update", "проверка обновлений: ${t.message}")
             null
         } finally {
             runCatching { conn.disconnect() }
@@ -100,10 +100,10 @@ object Updater {
         val dir = File(ctx.cacheDir, "updates").apply { mkdirs() }
         val target = File(dir, release.apkName.ifBlank { "update.apk" })
         if (target.exists() && release.size > 0 && target.length() == release.size && digestOk(target, release.digest)) {
-            android.util.Log.i("update", "update", "APK уже скачан: ${target.name}")
+            android.util.Log.i("update", "APK уже скачан: ${target.name}")
             return@withContext target
         }
-        android.util.Log.i("update", "update", "качаю ${release.apkUrl}")
+        android.util.Log.i("update", "качаю ${release.apkUrl}")
         val conn = (URL(release.apkUrl).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20_000
             readTimeout = 120_000
@@ -138,7 +138,7 @@ object Updater {
             target.delete()
             throw IllegalStateException("sha256 не совпал с релизом")
         }
-        android.util.Log.i("update", "update", "скачано ${target.length()} байт")
+        android.util.Log.i("update", "скачано ${target.length()} байт")
         target
     }
 
@@ -156,13 +156,13 @@ object Updater {
             }
         }
         val actual = md.digest().joinToString("") { "%02x".format(it) }
-        if (actual != expected) android.util.Log.e("update", "update", "sha256: $actual ≠ $expected")
+        if (actual != expected) android.util.Log.e("update", "sha256: $actual ≠ $expected")
         return actual == expected
     }
 
     fun install(ctx: Context, apk: File) {
         if (!ctx.packageManager.canRequestPackageInstalls()) {
-            android.util.Log.w("update", "update", "нет разрешения «Установка неизвестных приложений» — открываю настройки")
+            android.util.Log.w("update", "нет разрешения «Установка неизвестных приложений» — открываю настройки")
             runCatching {
                 ctx.startActivity(
                     Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${ctx.packageName}"))
@@ -176,7 +176,7 @@ object Updater {
             setDataAndType(uri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        android.util.Log.i("update", "update", "запускаю установщик для ${apk.name}")
+        android.util.Log.i("update", "запускаю установщик для ${apk.name}")
         ctx.startActivity(intent)
     }
 }
