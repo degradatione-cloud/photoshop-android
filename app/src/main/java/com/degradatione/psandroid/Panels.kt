@@ -340,7 +340,19 @@ private fun EffectsPanel(
     note: (String) -> Unit,
 ) {
     var strength by remember { mutableFloatStateOf(1f) }
-    val filters = remember(plugins) { FilterLibrary.builtIn + plugins }
+    var mode by remember { mutableStateOf(0) }          // 0 готовые, 1 из 1600, 2 плагины
+    var group by remember { mutableStateOf("все") }
+    val filters = remember(plugins) {
+        when (mode) {
+            1 -> {
+                val presets = PresetFactory.all
+                val filtered = if (group == "все") presets else presets.filter { it.group == group }
+                listOf(FilterLibrary.builtIn.first()) + filtered.map { it.def }
+            }
+            2 -> if (plugins.isEmpty()) FilterLibrary.builtIn else plugins
+            else -> FilterLibrary.builtIn
+        }
+    }
     val previews = remember(ed.version, plugins) {
         val base = runCatching {
             val comp = ed.composite()
@@ -351,6 +363,42 @@ private fun EffectsPanel(
     }
 
     Column(Modifier.fillMaxWidth().fillMaxHeight()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            for ((i, label) in listOf("Готовые", "1600", "Плагины ${plugins.size}").withIndex()) {
+                val sel = mode == i
+                val bg by animateColorAsState(
+                    if (sel) Ps.blue.copy(alpha = 0.15f) else Color.Transparent,
+                    animationSpec = tween(160), label = "fxModeBg",
+                )
+                TapBox(
+                    Modifier.background(bg, RoundedCornerShape(9.dp)).padding(horizontal = 9.dp, vertical = 5.dp),
+                    onClick = { mode = i },
+                ) {
+                    Text(label, color = if (sel) Ps.blue else Ps.textDim, fontSize = 10.5.sp)
+                }
+            }
+        }
+        if (mode == 1) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                for (g in PresetFactory.groups) {
+                    val sel = group == g
+                    TapBox(
+                        Modifier.background(
+                            if (sel) Ps.panelAlt else Color.Transparent,
+                            RoundedCornerShape(8.dp),
+                        ).padding(horizontal = 8.dp, vertical = 4.dp),
+                        onClick = { group = g },
+                    ) { Text(g, color = if (sel) Ps.text else Ps.textFaint, fontSize = 9.5.sp) }
+                }
+            }
+        }
         LazyRow(
             Modifier.fillMaxWidth().padding(vertical = 6.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
@@ -403,8 +451,15 @@ private fun EffectsPanel(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp).horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
+            PsChip("Авто-контраст") { ed.autoContrast(); note(ed.status) }
+            PsChip("Баланс бел.") { ed.autoWhiteBalance(); note(ed.status) }
             PsChip("Виньетка") { ed.quickVignette(); note("Виньетка") }
             PsChip("Зерно") { ed.quickGrain(); note("Зерно") }
+            PsChip("Тиснение") { ed.emboss(); note("Тиснение") }
+            PsChip("Контуры") { ed.edgeDetect(); note("Контуры") }
+            PsChip("Смаз") { ed.motionBlur(); note("Смаз") }
+            PsChip("Постеризация") { ed.posterize(6); note("Постеризация 6") }
+            PsChip("Шум") { ed.noise(24); note("Шум") }
             PsChip("Рамка бел.") { ed.addFrame(AColor.WHITE, (ed.doc.width * 0.035f).toInt().coerceAtLeast(6)); note("Рамка") }
             PsChip("Рамка чёрн.") { ed.addFrame(AColor.BLACK, (ed.doc.width * 0.035f).toInt().coerceAtLeast(6)); note("Рамка") }
             PsChip("Размытие") { ed.blur(); note("Размытие") }

@@ -590,6 +590,231 @@ class Editor {
         return file
     }
 
+    // ── пиксельные операции (adobe-подобные) ───────────────────────────────
+    private fun pixelOp(label: String, op: (Int) -> Int) {
+        val l = layer ?: return
+        checkpoint(label)
+        val w = l.bitmap.width
+        val h = l.bitmap.height
+        val px = IntArray(w * h)
+        l.bitmap.getPixels(px, 0, w, 0, 0, w, h)
+        for (i in px.indices) px[i] = op(px[i])
+        l.bitmap.setPixels(px, 0, w, 0, 0, w, h)
+        version++
+        status = label
+    }
+
+    private fun luma(c: Int): Int =
+        (0.299f * Color.red(c) + 0.587f * Color.green(c) + 0.114f * Color.blue(c)).toInt().coerceIn(0, 255)
+
+    fun autoContrast() {
+        val l = layer ?: return
+        val w = l.bitmap.width
+        val h = l.bitmap.height
+        val px = IntArray(w * h)
+        l.bitmap.getPixels(px, 0, w, 0, 0, w, h)
+        var lo = 255
+        var hi = 0
+        for (c in px) {
+            val y = luma(c)
+            if (y < lo) lo = y
+            if (y > hi) hi = y
+        }
+        if (hi - lo < 4) {
+            status = "Авто-контраст: диапазон уже полный"
+            return
+        }
+        val lut = IntArray(256) { v -> (((v - lo) * 255) / (hi - lo)).coerceIn(0, 255) }
+        checkpoint("Авто-контраст")
+        for (i in px.indices) {
+            val c = px[i]
+            px[i] = Color.argb(Color.alpha(c), lut[Color.red(c)], lut[Color.green(c)], lut[Color.blue(c)])
+        }
+        l.bitmap.setPixels(px, 0, w, 0, 0, w, h)
+        version++
+        status = "Авто-контраст: $lo…$hi → 0…255"
+    }
+
+    fun autoWhiteBalance() {
+        val l = layer ?: return
+        val w = l.bitmap.width
+        val h = l.bitmap.height
+        val px = IntArray(w * h)
+        l.bitmap.getPixels(px, 0, w, 0, 0, w, h)
+        var sr = 0L
+        var sg = 0L
+        var sb = 0L
+        for (c in px) {
+            sr += Color.red(c); sg += Color.green(c); sb += Color.blue(c)
+        }
+        val n = px.size.coerceAtLeast(1)
+        val ar = (sr / n).coerceAtLeast(1)
+        val ag = (sg / n).coerceAtLeast(1)
+        val ab = (sb / n).coerceAtLeast(1)
+        val gray = (ar + ag + ab) / 3
+        val kr = gray.toFloat() / ar
+        val kg = gray.toFloat() / ag
+        val kb = gray.toFloat() / ab
+        checkpoint("Баланс белого")
+        for (i in px.indices) {
+            val c = px[i]
+            px[i] = Color.argb(
+                Color.alpha(c),
+                (Color.red(c) * kr).toInt().coerceIn(0, 255),
+                (Color.green(c) * kg).toInt().coerceIn(0, 255),
+                (Color.blue(c) * kb).toInt().coerceIn(0, 255),
+            )
+        }
+        l.bitmap.setPixels(px, 0, w, 0, 0, w, h)
+        version++
+        status = "Баланс белого выровнен"
+    }
+
+    fun posterize(levels: Int) {
+        val n = levels.coerceIn(2, 32)
+        val lut = IntArray(256) { v -> (Math.round(v * (n - 1) / 255f) * 255 / (n - 1)) }
+        pixelOp("Постеризация $n") { c ->
+            Color.argb(Color.alpha(c), lut[Color.red(c)], lut[Color.green(c)], Color.blue(c).let { lut[it] })
+        }
+    }
+
+    fun threshold(t: Int) {
+        val thr = t.coerceIn(0, 255)
+        pixelOp("Порог $thr") { c ->
+            val y = luma(c)
+            Color.argb(Color.alpha(c), if (y >= thr) 255 else 0, if (y >= thr) 255 else 0, if (y >= thr) 255 else 0)
+        }
+    }
+
+    fun pixelate(block: Int) {
+        val l = layer ?: return
+        val b = block.coerceIn(2, 64)
+        checkpoint("Пикселизация $b")
+        val w = l.bitmap.width
+        val h = l.bitmap.height
+        val px = IntArray(w * h)
+        l.bitmap.getPixels(px, 0, w, 0, 0, w, h)
+        var y = 0
+        while (y < h) {
+            var x = 0
+            while (x < w) {
+                var r = 0L; var g = 0L; var bl = 0L; var al = 0L; var cnt = 0
+                for (dy in 0 until b) {
+                    for (dx in 0 until b) {
+                        val xx = x + dx
+                        val yy = y + dy
+                        if (xx >= w || yy >= h) continue
+                        val c = px[yy * w + xx]
+                        r += Color.red(c); g += Color.green(c); bl += Color.blue(c); al += Color.alpha(c); cnt++
+                    }
+                }
+                if (cnt == 0) { x += b; continue }
+                val avg = Color.argb((al / cnt).toInt(), (r / cnt).toInt(), (g / cnt).toInt(), (bl / cnt).toInt())
+                for (dy in 0 until b) {
+                    for (dx in 0 until b) {
+                        val xx = x + dx
+                        val yy = y + dy
+                        if (xx >= w || yy >= h) continue
+                        px[yy * w + xx] = avg
+                    }
+                }
+                x += b
+            }
+            y += b
+        }
+        l.bitmap.setPixels(px, 0, w, 0, 0, w, h)
+        version++
+        status = "Пикселизация $b px"
+    }
+
+    fun convolve(label: String, kernel: IntArray, offset: Int = 0, divisor: Int = 1) {
+        val l = layer ?: return
+        checkpoint(label)
+        val w = l.bitmap.width
+        val h = l.bitmap.height
+        val src = IntArray(w * h)
+        l.bitmap.getPixels(src, 0, w, 0, 0, w, h)
+        val dst = IntArray(w * h)
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                var r = 0
+                var g = 0
+                var b = 0
+                var i = 0
+                for (dy in -1..1) {
+                    for (dx in -1..1) {
+                        val xx = (x + dx).coerceIn(0, w - 1)
+                        val yy = (y + dy).coerceIn(0, h - 1)
+                        val c = src[yy * w + xx]
+                        val k = kernel[i++]
+                        r += Color.red(c) * k
+                        g += Color.green(c) * k
+                        b += Color.blue(c) * k
+                    }
+                }
+                val d = if (divisor == 0) 1 else divisor
+                dst[y * w + x] = Color.argb(
+                    Color.alpha(src[y * w + x]),
+                    (r / d + offset).coerceIn(0, 255),
+                    (g / d + offset).coerceIn(0, 255),
+                    (b / d + offset).coerceIn(0, 255),
+                )
+            }
+        }
+        l.bitmap.setPixels(dst, 0, w, 0, 0, w, h)
+        version++
+        status = label
+    }
+
+    fun emboss() = convolve("Тиснение", intArrayOf(-2, -1, 0, -1, 1, 1, 0, 1, 2), offset = 128)
+
+    fun edgeDetect() = convolve("Контуры", intArrayOf(0, -1, 0, -1, 4, -1, 0, -1, 0), offset = 40)
+
+    fun motionBlur() = convolve("Смаз", intArrayOf(0, 0, 0, 1, 1, 1, 0, 0, 0), divisor = 3)
+
+    fun noise(amount: Int) {
+        val a = amount.coerceIn(1, 120)
+        val rnd = java.util.Random()
+        pixelOp("Шум $a") { c ->
+            val d = (rnd.nextGaussian() * a).toInt()
+            Color.argb(
+                Color.alpha(c),
+                (Color.red(c) + d).coerceIn(0, 255),
+                (Color.green(c) + d).coerceIn(0, 255),
+                (Color.blue(c) + d).coerceIn(0, 255),
+            )
+        }
+    }
+
+    /** Свести активный слой с нижним (как Ctrl+E). */
+    fun mergeDown() {
+        if (activeIndex <= 0) {
+            status = "Ниже нет слоя"
+            return
+        }
+        checkpoint("Свести вниз")
+        val top = doc.layers[activeIndex]
+        val bottom = doc.layers[activeIndex - 1]
+        val out = Bitmap.createBitmap(doc.width, doc.height, Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        val pb = Paint().apply {
+            alpha = (bottom.opacity * 255).toInt()
+            xfermode = PorterDuffXfermode(bottom.blend.porter)
+        }
+        c.drawBitmap(bottom.bitmap, 0f, 0f, pb)
+        val pt = Paint().apply {
+            alpha = (top.opacity * 255).toInt()
+            xfermode = PorterDuffXfermode(top.blend.porter)
+        }
+        c.drawBitmap(top.bitmap, 0f, 0f, pt)
+        val merged = Layer(bottom.id, "${bottom.name} + ${top.name}".take(28), out, true, 1f, PsBlend.NORMAL)
+        doc.layers[activeIndex - 1] = merged
+        doc.layers.removeAt(activeIndex)
+        activeIndex -= 1
+        version++
+        status = "Слои сведены"
+    }
+
     // ── эффекты и плагины ──────────────────────────────────────────────────
     /**
      * Применяет фильтр к активному слою. strength 0..1 — сила эффекта

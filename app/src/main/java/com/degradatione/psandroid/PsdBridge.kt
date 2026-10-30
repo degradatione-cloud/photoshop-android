@@ -54,6 +54,13 @@ object PsdBridge {
         return out
     }
 
+    fun writePsd(manifestJson: String, out: File): String {
+        if (!available()) throw IllegalStateException(status())
+        out.parentFile?.mkdirs()
+        return nativeWritePsd(manifestJson, out.absolutePath)
+    }
+
     private external fun nativeReadPsd(path: String, outDir: String): String
+    private external fun nativeWritePsd(manifest: String, outPath: String): String
     private external fun nativeVersion(): String
 }

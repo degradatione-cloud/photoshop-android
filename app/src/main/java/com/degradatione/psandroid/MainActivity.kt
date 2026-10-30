@@ -303,6 +303,27 @@ fun PsApp(ed: Editor) {
             "open" -> pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             "psd" -> pickPsd.launch(arrayOf("*/*"))
             "png" -> savePng()
+            "psdOut" -> scope.launch {
+                busy = "Собираю PSD…"
+                val res = withContext(Dispatchers.IO) {
+                    runCatching { PsdExporter.export(ed, ctx.cacheDir, ed.docName) }
+                }
+                res.onSuccess { f ->
+                    val saved = withContext(Dispatchers.IO) { runCatching { savePsdToDownloads(ctx, f) } }
+                    note(saved.fold({ "PSD → Download/Photoshop (${f.length() / 1024} KB)" }, { "PSD готов, но в загрузки не лёг: ${it.message}" }))
+                }.onFailure { note("PSD: ${it.message}") }
+                busy = null
+            }
+            "autoC" -> { ed.autoContrast(); note(ed.status) }
+            "autoW" -> { ed.autoWhiteBalance(); note(ed.status) }
+            "poster" -> dialog = "poster"
+            "threshold" -> dialog = "threshold"
+            "pixelate" -> dialog = "pixelate"
+            "noiseDlg" -> dialog = "noise"
+            "emboss" -> { ed.emboss(); note("Тиснение") }
+            "edge" -> { ed.edgeDetect(); note("Контуры") }
+            "mblur" -> { ed.motionBlur(); note("Смаз") }
+            "mergeDown" -> ed.mergeDown()
             "share" -> shareImage(false)
             "shareJpg" -> shareImage(true)
             "undo" -> ed.undoStep()
@@ -578,6 +599,30 @@ fun PsApp(ed: Editor) {
             onApply = { a, b -> ed.brightnessContrast(a, b); dialog = null },
             onDismiss = { dialog = null },
         )
+        "poster" -> OneSliderDialog(
+            title = "Постеризация", label = "Уровней",
+            initial = 6f, min = 2f, max = 24f, percent = false,
+            onApply = { ed.posterize(it.roundToInt()); dialog = null },
+            onDismiss = { dialog = null },
+        )
+        "threshold" -> OneSliderDialog(
+            title = "Порог", label = "Уровень",
+            initial = 128f, min = 0f, max = 255f, percent = false,
+            onApply = { ed.threshold(it.roundToInt()); dialog = null },
+            onDismiss = { dialog = null },
+        )
+        "pixelate" -> OneSliderDialog(
+            title = "Пикселизация", label = "Блок",
+            initial = 12f, min = 2f, max = 64f, percent = false,
+            onApply = { ed.pixelate(it.roundToInt()); dialog = null },
+            onDismiss = { dialog = null },
+        )
+        "noise" -> OneSliderDialog(
+            title = "Шум", label = "Сила",
+            initial = 24f, min = 1f, max = 120f, percent = false,
+            onApply = { ed.noise(it.roundToInt()); dialog = null },
+            onDismiss = { dialog = null },
+        )
         "sat" -> OneSliderDialog(
             title = "Насыщенность", label = "Насыщенность",
             initial = 1f, min = 0f, max = 2f, percent = true,
@@ -673,6 +718,7 @@ private val MENU = listOf(
     "Открыть фото" to "open",
     "Импорт PSD" to "psd",
     "Сохранить PNG" to "png",
+    "Сохранить PSD (слои)" to "psdOut",
     "Поделиться PNG" to "share",
     "Поделиться JPG" to "shareJpg",
     "ИЗОБРАЖЕНИЕ" to "",
@@ -681,6 +727,15 @@ private val MENU = listOf(
     "Отразить ↕" to "flipV",
     "Размер…" to "resize",
     "Кадрировать" to "crop",
+    "Авто-контраст" to "autoC",
+    "Баланс белого" to "autoW",
+    "Постеризация…" to "poster",
+    "Порог…" to "threshold",
+    "Пикселизация…" to "pixelate",
+    "Тиснение" to "emboss",
+    "Контуры" to "edge",
+    "Смаз (motion)" to "mblur",
+    "Шум…" to "noiseDlg",
     "Уровни…" to "levels",
     "Экспозиция…" to "exposure",
     "Температура…" to "temp",
@@ -693,6 +748,7 @@ private val MENU = listOf(
     "СЛОЙ" to "",
     "Новый слой" to "layerAdd",
     "Дублировать слой" to "layerDup",
+    "Свести вниз" to "mergeDown",
     "Удалить слой" to "layerDel",
     "Свести слои" to "flatten",
     "ПОМОЩЬ" to "",
@@ -822,4 +878,16 @@ fun CropActions(visible: Boolean, modifier: Modifier = Modifier, onApply: () -> 
             PsChip("Отмена", onClick = onCancel)
         }
     }
+}
+
+private fun savePsdToDownloads(ctx: android.content.Context, src: File): android.net.Uri {
+    val values = ContentValues().apply {
+        put(MediaStore.MediaColumns.DISPLAY_NAME, "PS_${System.currentTimeMillis()}.psd")
+        put(MediaStore.MediaColumns.MIME_TYPE, "image/vnd.adobe.photoshop")
+        put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Photoshop")
+    }
+    val uri = ctx.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        ?: error("MediaStore отказал")
+    ctx.contentResolver.openOutputStream(uri)!!.use { out -> src.inputStream().use { it.copyTo(out) } }
+    return uri
 }
