@@ -84,7 +84,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.awaitPointerEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -433,39 +432,32 @@ fun PsApp(ed: Editor) {
                 )
             }
 
-            AnimatedVisibility(
+            PillOverlay(
                 visible = pill != null,
-                enter = fadeIn(tween(160)) + slideInVertically(tween(220)) { -it / 2 },
-                exit = fadeOut(tween(140)),
+                text = pill.orEmpty(),
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
-            ) { StatusPill(pill.orEmpty()) }
+            )
 
-            AnimatedVisibility(visible = busy != null, modifier = Modifier.align(Alignment.Center)) {
-                StatusPill(busy ?: "")
-            }
+            PillOverlay(
+                visible = busy != null,
+                text = busy.orEmpty(),
+                modifier = Modifier.align(Alignment.Center),
+            )
 
-            AnimatedVisibility(
+            CropActions(
                 visible = cropRect != null,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically(),
                 modifier = Modifier.align(Alignment.BottomCenter).padding(start = 8.dp, bottom = 8.dp),
-            ) {
-                Row(
-                    Modifier.background(Ps.panel, RoundedCornerShape(18.dp)).padding(5.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    PsChip("Применить", accent = true) {
-                        cropRect?.let { r ->
-                            if (r.width > 4 && r.height > 4) {
-                                ed.crop(android.graphics.RectF(r.left, r.top, r.right, r.bottom))
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            }
+                onApply = {
+                    cropRect?.let { r ->
+                        if (r.width > 4 && r.height > 4) {
+                            ed.crop(android.graphics.RectF(r.left, r.top, r.right, r.bottom))
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         }
-                        cropRect = null
                     }
-                    PsChip("Отмена") { cropRect = null }
-                }
-            }
+                    cropRect = null
+                },
+                onCancel = { cropRect = null },
+            )
 
             Row(
                 Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 6.dp),
@@ -765,4 +757,32 @@ fun PsMiniIcon(text: String, onClick: () -> Unit) {
         Modifier.size(30.dp).background(Ps.panel.copy(alpha = 0.92f), CircleShape),
         onClick = onClick,
     ) { Text(text, color = Ps.text, fontSize = 10.sp, maxLines = 1) }
+}
+
+@Composable
+fun PillOverlay(visible: Boolean, text: String, modifier: Modifier = Modifier) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(160)) + slideInVertically(tween(220)) { -it / 2 },
+        exit = fadeOut(tween(140)),
+        modifier = modifier,
+    ) { StatusPill(text) }
+}
+
+@Composable
+fun CropActions(visible: Boolean, modifier: Modifier = Modifier, onApply: () -> Unit, onCancel: () -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn() + expandVertically(),
+        exit = fadeOut() + shrinkVertically(),
+        modifier = modifier,
+    ) {
+        Row(
+            Modifier.background(Ps.panel, RoundedCornerShape(18.dp)).padding(5.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            PsChip("Применить", accent = true, onClick = onApply)
+            PsChip("Отмена", onClick = onCancel)
+        }
+    }
 }

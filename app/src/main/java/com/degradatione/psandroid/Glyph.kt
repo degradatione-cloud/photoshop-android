@@ -137,7 +137,7 @@ fun TapBox(
     enabled: Boolean = true,
     scaleTo: Float = 0.92f,
     onClick: () -> Unit,
-    content: @Composable () -> Unit,
+    content: @Composable () -> Unit = {},
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
